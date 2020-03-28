@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -13,6 +13,8 @@
 #define TOR_FEATURE_DIRAUTH_DIRAUTH_OPTIONS_ST_H
 
 #include "lib/conf/confdecl.h"
+#include "feature/nodelist/routerset.h"
+
 #define CONF_CONTEXT STRUCT
 #include "feature/dirauth/dirauth_options.inc"
 #undef CONF_CONTEXT

@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -66,6 +66,8 @@ int init_keys_client(void);
 uint16_t router_get_active_listener_port_by_type_af(int listener_type,
                                                     sa_family_t family);
 uint16_t router_get_advertised_or_port(const or_options_t *options);
+void router_get_advertised_ipv6_or_ap(const or_options_t *options,
+                                      tor_addr_port_t *ipv6_ap_out);
 uint16_t router_get_advertised_or_port_by_af(const or_options_t *options,
                                              sa_family_t family);
 uint16_t router_get_advertised_dir_port(const or_options_t *options,
@@ -117,7 +119,6 @@ const char *routerinfo_err_to_string(int err);
 int routerinfo_err_is_transient(int err);
 
 void router_reset_warnings(void);
-void router_reset_reachability(void);
 void router_free_all(void);
 
 #ifdef ROUTER_PRIVATE

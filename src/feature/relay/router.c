@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 #define ROUTER_PRIVATE
@@ -748,8 +748,8 @@ v3_authority_check_key_expiry(void)
 }
 
 /** Get the lifetime of an onion key in days. This value is defined by the
- * network consesus parameter "onion-key-rotation-days". Always returns a value
- * between <b>MIN_ONION_KEY_LIFETIME_DAYS</b> and
+ * network consensus parameter "onion-key-rotation-days". Always returns a
+ * value between <b>MIN_ONION_KEY_LIFETIME_DAYS</b> and
  * <b>MAX_ONION_KEY_LIFETIME_DAYS</b>.
  */
 static int
@@ -763,7 +763,7 @@ get_onion_key_rotation_days_(void)
 }
 
 /** Get the current lifetime of an onion key in seconds. This value is defined
- * by the network consesus parameter "onion-key-rotation-days", but the value
+ * by the network consensus parameter "onion-key-rotation-days", but the value
  * is converted to seconds.
  */
 int
@@ -773,7 +773,7 @@ get_onion_key_lifetime(void)
 }
 
 /** Get the grace period of an onion key in seconds. This value is defined by
- * the network consesus parameter "onion-key-grace-period-days", but the value
+ * the network consensus parameter "onion-key-grace-period-days", but the value
  * is converted to seconds.
  */
 int
@@ -1074,8 +1074,10 @@ init_keys(void)
   if (authdir_mode_v3(options)) {
     const char *m = NULL;
     routerinfo_t *ri;
-    /* We need to add our own fingerprint so it gets recognized. */
-    if (dirserv_add_own_fingerprint(get_server_identity_key())) {
+    /* We need to add our own fingerprint and ed25519 key so it gets
+     * recognized. */
+    if (dirserv_add_own_fingerprint(get_server_identity_key(),
+                                    get_master_identity_key())) {
       log_err(LD_GENERAL,"Error adding own fingerprint to set of relays");
       return -1;
     }
@@ -1442,6 +1444,50 @@ router_get_advertised_or_port_by_af(const or_options_t *options,
                                                       family);
 
   return port;
+}
+
+/** As router_get_advertised_or_port(), but returns the IPv6 address and
+ *  port in ipv6_ap_out, which must not be NULL. Returns a null address and
+ * zero port, if no ORPort is found. */
+void
+router_get_advertised_ipv6_or_ap(const or_options_t *options,
+                                 tor_addr_port_t *ipv6_ap_out)
+{
+  /* Bug in calling function, we can't return a sensible result, and it
+   * shouldn't use the NULL pointer once we return. */
+  tor_assert(ipv6_ap_out);
+
+  /* If there is no valid IPv6 ORPort, return a null address and port. */
+  tor_addr_make_null(&ipv6_ap_out->addr, AF_INET6);
+  ipv6_ap_out->port = 0;
+
+  const tor_addr_t *addr = get_first_advertised_addr_by_type_af(
+                                                      CONN_TYPE_OR_LISTENER,
+                                                      AF_INET6);
+  const uint16_t port = router_get_advertised_or_port_by_af(
+                                                      options,
+                                                      AF_INET6);
+
+  if (!addr || port == 0) {
+    log_info(LD_CONFIG, "There is no advertised IPv6 ORPort.");
+    return;
+  }
+
+  /* If the relay is configured using the default authorities, disallow
+   * internal IPs. Otherwise, allow them. For IPv4 ORPorts and DirPorts,
+   * this check is done in resolve_my_address(). See #33681. */
+  const int default_auth = using_default_dir_authorities(options);
+  if (tor_addr_is_internal(addr, 0) && default_auth) {
+    log_warn(LD_CONFIG,
+             "Unable to use configured IPv6 ORPort \"%s\" in a "
+             "descriptor. Skipping it. "
+             "Try specifying a globally reachable address explicitly.",
+             fmt_addrport(addr, port));
+    return;
+  }
+
+  tor_addr_copy(&ipv6_ap_out->addr, addr);
+  ipv6_ap_out->port = port;
 }
 
 /** Return the port that we should advertise as our DirPort;
@@ -1988,34 +2034,11 @@ router_build_fresh_unsigned_routerinfo,(routerinfo_t **ri_out))
                sizeof(curve25519_public_key_t));
 
   /* For now, at most one IPv6 or-address is being advertised. */
-  {
-    const port_cfg_t *ipv6_orport = NULL;
-    SMARTLIST_FOREACH_BEGIN(get_configured_ports(), const port_cfg_t *, p) {
-      if (p->type == CONN_TYPE_OR_LISTENER &&
-          ! p->server_cfg.no_advertise &&
-          ! p->server_cfg.bind_ipv4_only &&
-          tor_addr_family(&p->addr) == AF_INET6) {
-        /* Like IPv4, if the relay is configured using the default
-         * authorities, disallow internal IPs. Otherwise, allow them. */
-        const int default_auth = using_default_dir_authorities(options);
-        if (! tor_addr_is_internal(&p->addr, 0) || ! default_auth) {
-          ipv6_orport = p;
-          break;
-        } else {
-          char addrbuf[TOR_ADDR_BUF_LEN];
-          log_warn(LD_CONFIG,
-                   "Unable to use configured IPv6 address \"%s\" in a "
-                   "descriptor. Skipping it. "
-                   "Try specifying a globally reachable address explicitly.",
-                   tor_addr_to_str(addrbuf, &p->addr, sizeof(addrbuf), 1));
-        }
-      }
-    } SMARTLIST_FOREACH_END(p);
-    if (ipv6_orport) {
-      tor_addr_copy(&ri->ipv6_addr, &ipv6_orport->addr);
-      ri->ipv6_orport = ipv6_orport->port;
-    }
-  }
+  tor_addr_port_t ipv6_orport;
+  router_get_advertised_ipv6_or_ap(options, &ipv6_orport);
+  /* If there is no valud IPv6 ORPort, the address and port are null. */
+  tor_addr_copy(&ri->ipv6_addr, &ipv6_orport.addr);
+  ri->ipv6_orport = ipv6_orport.port;
 
   ri->identity_pkey = crypto_pk_dup_key(get_server_identity_key());
   if (BUG(crypto_pk_get_digest(ri->identity_pkey,
@@ -2906,15 +2929,20 @@ router_dump_router_to_string(routerinfo_t *router,
   }
 
   if (options->BridgeRelay) {
-    const char *bd;
+    char *bd = NULL;
+
     if (options->BridgeDistribution && strlen(options->BridgeDistribution)) {
-      bd = options->BridgeDistribution;
+      bd = tor_strdup(options->BridgeDistribution);
     } else {
-      bd = "any";
+      bd = tor_strdup("any");
     }
-    if (strchr(bd, '\n') || strchr(bd, '\r'))
-      bd = escaped(bd);
+
+    // Make sure our value is lowercased in the descriptor instead of just
+    // forwarding what the user wrote in their torrc directly.
+    tor_strlower(bd);
+
     smartlist_add_asprintf(chunks, "bridge-distribution-request %s\n", bd);
+    tor_free(bd);
   }
 
   if (router->onion_curve25519_pkey) {

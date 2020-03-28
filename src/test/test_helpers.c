@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2019, The Tor Project, Inc. */
+/* Copyright (c) 2014-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -45,14 +45,14 @@
 #include "test/test_connection.h"
 
 #ifdef HAVE_CFLAG_WOVERLENGTH_STRINGS
-DISABLE_GCC_WARNING(overlength-strings)
+DISABLE_GCC_WARNING("-Woverlength-strings")
 /* We allow huge string constants in the unit tests, but not in the code
  * at large. */
 #endif
 #include "test_descriptors.inc"
 #include "core/or/circuitlist.h"
 #ifdef HAVE_CFLAG_WOVERLENGTH_STRINGS
-ENABLE_GCC_WARNING(overlength-strings)
+ENABLE_GCC_WARNING("-Woverlength-strings")
 #endif
 
 /* Return a statically allocated string representing yesterday's date

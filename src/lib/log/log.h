@@ -1,7 +1,7 @@
 /* Copyright (c) 2001, Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -186,7 +186,7 @@ void logs_set_domain_logging(int enabled);
 int get_min_log_level(void);
 void switch_logs_debug(void);
 void logs_free_all(void);
-void logs_close_sigsafe(void);
+void logs_flush_sigsafe(void);
 void add_default_log(int min_severity);
 void close_temp_logs(void);
 void rollback_log_changes(void);

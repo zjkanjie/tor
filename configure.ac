@@ -4,7 +4,7 @@ dnl Copyright (c) 2007-2019, The Tor Project, Inc.
 dnl See LICENSE for licensing information
 
 AC_PREREQ([2.63])
-AC_INIT([tor],[0.4.3.0-alpha-dev])
+AC_INIT([tor],[0.4.4.0-alpha-dev])
 AC_CONFIG_SRCDIR([src/app/main/tor_main.c])
 AC_CONFIG_MACRO_DIR([m4])
 
@@ -16,7 +16,7 @@ configure_flags="$*"
 # version number changes.  Tor uses it to make sure that it
 # only shuts down for missing "required protocols" when those protocols
 # are listed as required by a consensus after this date.
-AC_DEFINE(APPROX_RELEASE_DATE, ["2019-10-11"], # for 0.4.3.0-alpha-dev
+AC_DEFINE(APPROX_RELEASE_DATE, ["2020-02-11"], # for 0.4.4.0-alpha-dev
           [Approximate date when this software was released. (Updated when the version changes.)])
 
 # "foreign" means we don't follow GNU package layout standards
@@ -228,6 +228,13 @@ if test "x$enable_expensive_hardening" = "xyes" || test "x$enable_fragile_harden
   AC_DEFINE(DEBUG_SMARTLIST, 1, [Enable smartlist debugging])
 fi
 
+AC_ARG_ENABLE(all-bugs-are-fatal,
+   AS_HELP_STRING(--enable-all-bugs-are-fatal, [force all soft asserts in Tor codebase (tor_assert_nonfatal(), BUG(), etc.) to act as hard asserts (tor_assert() and equivalents); makes Tor fragile; only recommended for dev builds]))
+
+if test "x$enable_all_bugs_are_fatal" = "xyes"; then
+  AC_DEFINE(ALL_BUGS_ARE_FATAL, 1, [All assert failures are fatal])
+fi
+
 dnl Linker hardening options
 dnl Currently these options are ELF specific - you can't use this with MacOSX
 AC_ARG_ENABLE(linker-hardening,
@@ -278,7 +285,7 @@ dnl Tor modules options. These options are namespaced with --disable-module-XXX
 dnl ---
 
 dnl All our modules.
-m4_define(MODULES, relay dirauth)
+m4_define(MODULES, relay dirauth dircache)
 
 dnl Relay module.
 AC_ARG_ENABLE([module-relay],
@@ -288,6 +295,14 @@ AM_CONDITIONAL(BUILD_MODULE_RELAY, [test "x$enable_module_relay" != "xno"])
 AM_COND_IF(BUILD_MODULE_RELAY,
            AC_DEFINE([HAVE_MODULE_RELAY], [1],
                      [Compile with Relay feature support]))
+
+dnl Dircache module.  (This cannot be enabled or disabled independently of
+dnl the relay module.  It is not listed by --list-modules for this reason.)
+AM_CONDITIONAL(BUILD_MODULE_DIRCACHE,
+               [test "x$enable_module_relay" != "xno"])
+AM_COND_IF(BUILD_MODULE_DIRCACHE,
+           AC_DEFINE([HAVE_MODULE_DIRCACHE], [1],
+                     [Compile with directory cache support]))
 
 dnl Directory Authority module.
 AC_ARG_ENABLE([module-dirauth],
@@ -641,6 +656,7 @@ AC_CHECK_FUNCS(
 	explicit_bzero \
 	timingsafe_memcmp \
 	flock \
+	fsync \
 	ftime \
 	get_current_dir_name \
 	getaddrinfo \
@@ -2583,20 +2599,17 @@ PPRINT_PROP_STRING([Compiler], [$CC])
 PPRINT_PROP_STRING([Host OS], [$host_os])
 AS_ECHO
 
-test "x$enable_gcc_warnings" = "xyes" && value=1 || value=0
-PPRINT_PROP_BOOL([Verbose Warnings (--enable-gcc-warnings)], $value)
-
 test "x$enable_fatal_warnings" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([Warnings are fatal (--enable-fatal-warnings)], $value)
 
 test "x$enable_rust" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([Rust support (--enable-rust)], $value)
 
+test "x$enable_cargo_online_mode" = "xyes" && value=1 || value=0
+PPRINT_PROP_BOOL([Cargo Online Fetch (--enable-cargo-online-mode)], $value)
+
 test "x$enable_android" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([Android support (--enable-android)], $value)
-
-test "x$enable_systemd" = "xyes" && value=1 || value=0
-PPRINT_PROP_BOOL([Systemd support (--enable-systemd)], $value)
 
 AS_ECHO
 PPRINT_SUBTITLE([Static Build])
@@ -2634,6 +2647,15 @@ PPRINT_PROP_BOOL([libseccomp (--disable-seccomp)], $value)
 test "x$enable_libscrypt" != "xno" && value=1 || value=0
 PPRINT_PROP_BOOL([libscrypt (--disable-libscrypt)], $value)
 
+test "x$enable_systemd" = "xyes" && value=1 || value=0
+PPRINT_PROP_BOOL([Systemd support (--enable-systemd)], $value)
+
+test "x$enable_lzma" = "xyes" && value=1 || value=0
+PPRINT_PROP_BOOL([liblzma (--enable-lzma)], $value)
+
+test "x$enable_zstd" = "xyes" && value=1 || value=0
+PPRINT_PROP_BOOL([libzstd (--enable-zstd)], $value)
+
 AS_ECHO
 PPRINT_SUBTITLE([Hardening])
 
@@ -2643,20 +2665,24 @@ PPRINT_PROP_BOOL([Compiler Hardening (--disable-gcc-hardening)], $value)
 test "x$enable_linker_hardening" != "xno" && value=1 || value=0
 PPRINT_PROP_BOOL([Linker Hardening (--disable-linker-hardening)], $value)
 
-test "x$enable_fragile_hardening" = "xyes" && value=1 || value=0
+test "x$fragile_hardening" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([Fragile Hardening (--enable-fragile-hardening, dev only)], $value)
 
 AS_ECHO
 PPRINT_SUBTITLE([Modules])
 
-test "x$enable_module_dirauth" != "xno" && value=1 || value=0
-PPRINT_PROP_BOOL([Directory Authority (--disable-module-dirauth)], $value)
-
-test "x$enable_module_relay" != "xno" && value=1 || value=0
-PPRINT_PROP_BOOL([Relay (--disable-module-relay)], $value)
+m4_foreach_w([mname], MODULES,
+  [
+    test "xenable_module_mname" != "xno" && value=1 || value=0
+    PPRINT_PROP_BOOL([mname (--disable-module-mname)], $value)
+  ]
+)
 
 AS_ECHO
 PPRINT_SUBTITLE([Documentation])
+
+test "x$enable_asciidoc" != "xno" && value=1 || value=0
+PPRINT_PROP_BOOL([AsciiDoc (--disable-asciidoc)], $value)
 
 test "x$enable_manpage" != "xno" && value=1 || value=0
 PPRINT_PROP_BOOL([Man Pages (--disable-manpage)], $value)
@@ -2671,7 +2697,7 @@ test "x$enable_unittests" != "xno" && value=1 || value=0
 PPRINT_PROP_BOOL([Unit tests (--disable-unittests)], $value)
 
 test "x$enable_asserts_in_tests" = "xno" && value=1 || value=0
-PPRINT_PROP_BOOL([assert()s disabled (--disable-asserts-in-tests, dev only)], $value)
+PPRINT_PROP_BOOL([assert()s enabled (--enable-asserts-in-tests, dev only)], $value)
 
 test "x$enable_coverage" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([Code Coverage (--enable-coverage)], $value)

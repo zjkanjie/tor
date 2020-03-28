@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2019, The Tor Project, Inc. */
+/* Copyright (c) 2016-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -41,6 +41,7 @@
 #include "feature/hs/hs_intropoint.h"
 #include "feature/hs/hs_service.h"
 #include "feature/hs/hs_stats.h"
+#include "feature/hs/hs_ob.h"
 
 #include "feature/dircommon/dir_connection_st.h"
 #include "core/or/edge_connection_st.h"
@@ -151,11 +152,11 @@ HT_PROTOTYPE(hs_service_ht,      /* Name of hashtable. */
              hs_service_t,       /* Object contained in the map. */
              hs_service_node,    /* The name of the HT_ENTRY member. */
              hs_service_ht_hash, /* Hashing function. */
-             hs_service_ht_eq)   /* Compare function for objects. */
+             hs_service_ht_eq);  /* Compare function for objects. */
 
 HT_GENERATE2(hs_service_ht, hs_service_t, hs_service_node,
              hs_service_ht_hash, hs_service_ht_eq,
-             0.6, tor_reallocarray, tor_free_)
+             0.6, tor_reallocarray, tor_free_);
 
 /** Query the given service map with a public key and return a service object
  * if found else NULL. It is also possible to set a directory path in the
@@ -266,6 +267,11 @@ service_clear_config(hs_service_config_t *config)
     SMARTLIST_FOREACH(config->clients, hs_service_authorized_client_t *, p,
                       service_authorized_client_free(p));
     smartlist_free(config->clients);
+  }
+  if (config->ob_master_pubkeys) {
+    SMARTLIST_FOREACH(config->ob_master_pubkeys, ed25519_public_key_t *, k,
+                      tor_free(k));
+    smartlist_free(config->ob_master_pubkeys);
   }
   memset(config, 0, sizeof(*config));
 }
@@ -701,8 +707,8 @@ get_extend_info_from_intro_point(const hs_service_intro_point_t *ip,
 
 /** Return the number of introduction points that are established for the
  * given descriptor. */
-static unsigned int
-count_desc_circuit_established(const hs_service_descriptor_t *desc)
+MOCK_IMPL(STATIC unsigned int,
+count_desc_circuit_established, (const hs_service_descriptor_t *desc))
 {
   unsigned int count = 0;
 
@@ -1764,7 +1770,8 @@ build_service_desc_superencrypted(const hs_service_t *service,
          sizeof(curve25519_public_key_t));
 
   /* Test that subcred is not zero because we might use it below */
-  if (BUG(fast_mem_is_zero((char*)desc->desc->subcredential, DIGEST256_LEN))) {
+  if (BUG(fast_mem_is_zero((char*)desc->desc->subcredential.subcred,
+                           DIGEST256_LEN))) {
     return -1;
   }
 
@@ -1781,7 +1788,7 @@ build_service_desc_superencrypted(const hs_service_t *service,
 
       /* Prepare the client for descriptor and then add to the list in the
        * superencrypted part of the descriptor */
-      hs_desc_build_authorized_client(desc->desc->subcredential,
+      hs_desc_build_authorized_client(&desc->desc->subcredential,
                                       &client->client_pk,
                                       &desc->auth_ephemeral_kp.seckey,
                                       desc->descriptor_cookie, desc_client);
@@ -1837,7 +1844,7 @@ build_service_desc_plaintext(const hs_service_t *service,
 
   /* Set the subcredential. */
   hs_get_subcredential(&service->keys.identity_pk, &desc->blinded_kp.pubkey,
-                       desc->desc->subcredential);
+                       &desc->desc->subcredential);
 
   plaintext = &desc->desc->plaintext_data;
 
@@ -1980,9 +1987,15 @@ build_service_descriptor(hs_service_t *service, uint64_t time_period_num,
 
   /* Assign newly built descriptor to the next slot. */
   *desc_out = desc;
+
   /* Fire a CREATED control port event. */
   hs_control_desc_event_created(service->onion_address,
                                 &desc->blinded_kp.pubkey);
+
+  /* If we are an onionbalance instance, we refresh our keys when we rotate
+   * descriptors. */
+  hs_ob_refresh_keys(service);
+
   return;
 
  err:
@@ -3042,13 +3055,85 @@ service_desc_hsdirs_changed(const hs_service_t *service,
   return should_reupload;
 }
 
+/** These are all the reasons why a descriptor upload can't occur. We use
+ * those to log the reason properly with the right rate limiting and for the
+ * right descriptor. */
+typedef enum {
+  LOG_DESC_UPLOAD_REASON_MISSING_IPS = 0,
+  LOG_DESC_UPLOAD_REASON_IP_NOT_ESTABLISHED = 1,
+  LOG_DESC_UPLOAD_REASON_NOT_TIME = 2,
+  LOG_DESC_UPLOAD_REASON_NO_LIVE_CONSENSUS = 3,
+  LOG_DESC_UPLOAD_REASON_NO_DIRINFO = 4,
+} log_desc_upload_reason_t;
+
+/** Maximum number of reasons. This is used to allocate the static array of
+ * all rate limiting objects. */
+#define LOG_DESC_UPLOAD_REASON_MAX LOG_DESC_UPLOAD_REASON_NO_DIRINFO
+
+/** Log the reason why we can't upload the given descriptor for the given
+ * service. This takes a message string (allocated by the caller) and a
+ * reason.
+ *
+ * Depending on the reason and descriptor, different rate limit applies. This
+ * is done because this function will basically be called every second. Each
+ * descriptor for each reason uses its own log rate limit object in order to
+ * avoid message suppression for different reasons and descriptors. */
+static void
+log_cant_upload_desc(const hs_service_t *service,
+                     const hs_service_descriptor_t *desc, const char *msg,
+                     const log_desc_upload_reason_t reason)
+{
+  /* Writing the log every minute shouldn't be too annoying for log rate limit
+   * since this can be emitted every second for each descriptor.
+   *
+   * However, for one specific case, we increase it to 10 minutes because it
+   * is hit constantly, as an expected behavior, which is the reason
+   * indicating that it is not the time to upload. */
+  static ratelim_t limits[2][LOG_DESC_UPLOAD_REASON_MAX + 1] =
+    { { RATELIM_INIT(60), RATELIM_INIT(60), RATELIM_INIT(60 * 10),
+        RATELIM_INIT(60), RATELIM_INIT(60) },
+      { RATELIM_INIT(60), RATELIM_INIT(60), RATELIM_INIT(60 * 10),
+        RATELIM_INIT(60), RATELIM_INIT(60) },
+    };
+  bool is_next_desc = false;
+  unsigned int rlim_pos = 0;
+  ratelim_t *rlim = NULL;
+
+  tor_assert(service);
+  tor_assert(desc);
+  tor_assert(msg);
+
+  /* Make sure the reason value is valid. It should never happen because we
+   * control that value in the code flow but will be apparent during
+   * development if a reason is added but LOG_DESC_UPLOAD_REASON_NUM_ is not
+   * updated. */
+  if (BUG(reason > LOG_DESC_UPLOAD_REASON_MAX || reason < 0)) {
+    return;
+  }
+
+  /* Ease our life. Flag that tells us if the descriptor is the next one. */
+  is_next_desc = (service->desc_next == desc);
+
+  /* Current descriptor is the first element in the ratelimit object array.
+   * The next descriptor is the second element. */
+  rlim_pos = (is_next_desc ? 1 : 0);
+  /* Get the ratelimit object for the reason _and_ right descriptor. */
+  rlim = &limits[rlim_pos][reason];
+
+  log_fn_ratelim(rlim, LOG_INFO, LD_REND,
+                 "Service %s can't upload its %s descriptor: %s",
+                 safe_str_client(service->onion_address),
+                 (is_next_desc) ? "next" : "current", msg);
+}
+
 /** Return 1 if the given descriptor from the given service can be uploaded
  * else return 0 if it can not. */
 static int
 should_service_upload_descriptor(const hs_service_t *service,
                               const hs_service_descriptor_t *desc, time_t now)
 {
-  unsigned int num_intro_points;
+  char *msg = NULL;
+  unsigned int num_intro_points, count_ip_established;
 
   tor_assert(service);
   tor_assert(desc);
@@ -3068,34 +3153,54 @@ should_service_upload_descriptor(const hs_service_t *service,
    * upload descriptor in this case. We need at least one for the service to
    * be reachable. */
   if (desc->missing_intro_points && num_intro_points == 0) {
+    msg = tor_strdup("Missing intro points");
+    log_cant_upload_desc(service, desc, msg,
+                         LOG_DESC_UPLOAD_REASON_MISSING_IPS);
     goto cannot;
   }
 
   /* Check if all our introduction circuit have been established for all the
    * intro points we have selected. */
-  if (count_desc_circuit_established(desc) != num_intro_points) {
+  count_ip_established = count_desc_circuit_established(desc);
+  if (count_ip_established != num_intro_points) {
+    tor_asprintf(&msg, "Intro circuits aren't yet all established (%d/%d).",
+                 count_ip_established, num_intro_points);
+    log_cant_upload_desc(service, desc, msg,
+                         LOG_DESC_UPLOAD_REASON_IP_NOT_ESTABLISHED);
     goto cannot;
   }
 
   /* Is it the right time to upload? */
   if (desc->next_upload_time > now) {
+    tor_asprintf(&msg, "Next upload time is %ld, it is now %ld.",
+                 (long int) desc->next_upload_time, (long int) now);
+    log_cant_upload_desc(service, desc, msg,
+                         LOG_DESC_UPLOAD_REASON_NOT_TIME);
     goto cannot;
   }
 
   /* Don't upload desc if we don't have a live consensus */
   if (!networkstatus_get_live_consensus(now)) {
+    msg = tor_strdup("No live consensus");
+    log_cant_upload_desc(service, desc, msg,
+                         LOG_DESC_UPLOAD_REASON_NO_LIVE_CONSENSUS);
     goto cannot;
   }
 
   /* Do we know enough router descriptors to have adequate vision of the HSDir
      hash ring? */
   if (!router_have_minimum_dir_info()) {
+    msg = tor_strdup("Not enough directory information");
+    log_cant_upload_desc(service, desc, msg,
+                         LOG_DESC_UPLOAD_REASON_NO_DIRINFO);
     goto cannot;
   }
 
   /* Can upload! */
   return 1;
+
  cannot:
+  tor_free(msg);
   return 0;
 }
 
@@ -3369,7 +3474,7 @@ service_handle_introduce2(origin_circuit_t *circ, const uint8_t *payload,
 
   /* The following will parse, decode and launch the rendezvous point circuit.
    * Both current and legacy cells are handled. */
-  if (hs_circ_handle_introduce2(service, circ, ip, desc->desc->subcredential,
+  if (hs_circ_handle_introduce2(service, circ, ip, &desc->desc->subcredential,
                                 payload, payload_len) < 0) {
     goto err;
   }
@@ -3552,6 +3657,12 @@ hs_service_add_ephemeral(ed25519_secret_key_t *sk, smartlist_t *ports,
                                   &service->keys.identity_sk) < 0) {
     log_warn(LD_CONFIG, "Unable to generate ed25519 public key"
                         "for v3 service.");
+    ret = RSAE_BADPRIVKEY;
+    goto err;
+  }
+
+  if (ed25519_validate_pubkey(&service->keys.identity_pk) < 0) {
+    log_warn(LD_CONFIG, "Bad ed25519 private key was provided");
     ret = RSAE_BADPRIVKEY;
     goto err;
   }
@@ -4040,6 +4151,11 @@ hs_service_free_(hs_service_t *service)
   /* Free replay cache from state. */
   if (service->state.replay_cache_rend_cookie) {
     replaycache_free(service->state.replay_cache_rend_cookie);
+  }
+
+  /* Free onionbalance subcredentials (if any) */
+  if (service->ob_subcreds) {
+    tor_free(service->ob_subcreds);
   }
 
   /* Wipe service keys. */

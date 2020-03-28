@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -844,8 +844,7 @@ rewrite_node_address_for_bridge(const bridge_info_t *bridge, node_t *node)
       }
     }
 
-    if (options->ClientPreferIPv6ORPort == -1 ||
-        options->ClientAutoIPv6ORPort == 0) {
+    if (options->ClientPreferIPv6ORPort == -1) {
       /* Mark which address to use based on which bridge_t we got. */
       node->ipv6_preferred = (tor_addr_family(&bridge->addr) == AF_INET6 &&
                               !tor_addr_is_null(&node->ri->ipv6_addr));

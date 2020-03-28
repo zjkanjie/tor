@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -231,8 +231,8 @@ check_server_ports(const smartlist_t *ports,
 }
 
 /** Parse all relay ports from <b>options</b>. On success, add parsed ports to
- * <b>ports</b>, and return 0.  On failure, set *<b>msg</b> to a description
- * of the problem and return -1.
+ * <b>ports</b>, and return 0.  On failure, set *<b>msg</b> to a newly
+ * allocated string describing the problem, and return -1.
  **/
 int
 port_parse_ports_relay(or_options_t *options,
@@ -334,7 +334,8 @@ port_update_port_set_relay(or_options_t *options,
  * Legacy validation function, which checks that the current OS is usable in
  * relay mode, if options is set to a relay mode.
  *
- * Warns about OSes with potential issues. Always returns 0.
+ * Warns about OSes with potential issues. Does not set *<b>msg</b>.
+ * Always returns 0.
  */
 int
 options_validate_relay_os(const or_options_t *old_options,
@@ -400,10 +401,14 @@ options_validate_relay_info(const or_options_t *old_options,
     }
   }
 
-  if (server_mode(options) && !options->ContactInfo)
-    log_notice(LD_CONFIG, "Your ContactInfo config option is not set. "
-        "Please consider setting it, so we can contact you if your server is "
-        "misconfigured or something else goes wrong.");
+  if (server_mode(options) && !options->ContactInfo) {
+    log_warn(LD_CONFIG,
+             "Your ContactInfo config option is not set. Please strongly "
+             "consider setting it, so we can contact you if your relay is "
+             "misconfigured, end-of-life, or something else goes wrong. "
+             "It is also possible that your relay might get rejected from "
+             "the network due to a missing valid contact address.");
+  }
 
   const char *ContactInfo = options->ContactInfo;
   if (ContactInfo && !string_is_utf8(ContactInfo, strlen(ContactInfo)))
@@ -468,7 +473,6 @@ compute_publishserverdescriptor(or_options_t *options)
  * - "https"
  * - "email"
  * - "moat"
- * - "hyphae"
  *
  * If the option string is unrecognised, a warning will be logged and 0 is
  * returned.  If the option string contains an invalid character, -1 is
@@ -481,11 +485,11 @@ check_bridge_distribution_setting(const char *bd)
     return 0;
 
   const char *RECOGNIZED[] = {
-    "none", "any", "https", "email", "moat", "hyphae"
+    "none", "any", "https", "email", "moat"
   };
   unsigned i;
   for (i = 0; i < ARRAY_LENGTH(RECOGNIZED); ++i) {
-    if (!strcmp(bd, RECOGNIZED[i]))
+    if (!strcasecmp(bd, RECOGNIZED[i]))
       return 0;
   }
 

@@ -1,6 +1,6 @@
 /* Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -273,7 +273,7 @@ main(int c, const char **v)
   int loglevel = LOG_ERR;
   int accel_crypto = 0;
 
-  subsystems_init_upto(SUBSYS_LEVEL_LIBS);
+  subsystems_init();
 
   options = options_new();
 
@@ -357,6 +357,21 @@ main(int c, const char **v)
   predicted_ports_init();
 
   atexit(remove_directory);
+
+  /* Look for TOR_SKIP_TESTCASES: a space-separated list of tests to skip. */
+  const char *skip_tests = getenv("TOR_SKIP_TESTCASES");
+  if (skip_tests) {
+    smartlist_t *skip = smartlist_new();
+    smartlist_split_string(skip, skip_tests, NULL,
+                           SPLIT_IGNORE_BLANK, -1);
+    int n = 0;
+    SMARTLIST_FOREACH_BEGIN(skip, char *, cp) {
+      n += tinytest_skip(testgroups, cp);
+      tor_free(cp);
+    } SMARTLIST_FOREACH_END(cp);
+    printf("Skipping %d testcases.\n", n);
+    smartlist_free(skip);
+  }
 
   int have_failed = (tinytest_main(c, v, testgroups) != 0);
 

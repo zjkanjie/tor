@@ -1,5 +1,5 @@
 /* Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -323,10 +323,8 @@ handle_control_getconf(control_connection_t *conn,
     send_control_done(conn);
   }
 
-  SMARTLIST_FOREACH(answers, char *, cp, tor_free(cp));
-  smartlist_free(answers);
-  smartlist_free(unrecognized);
-
+  control_reply_free(answers);
+  control_reply_free(unrecognized);
   return 0;
 }
 
@@ -2274,7 +2272,7 @@ typedef struct control_cmd_def_t {
  **/
 #define ONE_LINE(name, flags)                                   \
   {                                                             \
-    #name,                                                      \
+    (#name),                                                    \
       handle_control_ ##name,                                   \
       flags,                                                    \
       &name##_syntax,                                           \
@@ -2285,7 +2283,7 @@ typedef struct control_cmd_def_t {
  * flags.
  **/
 #define MULTLINE(name, flags)                                   \
-  { "+"#name,                                                   \
+  { ("+"#name),                                                 \
       handle_control_ ##name,                                   \
       flags,                                                    \
       &name##_syntax                                            \

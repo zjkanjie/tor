@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2019, The Tor Project, Inc. */
+/* Copyright (c) 2016-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -77,6 +77,23 @@ mock_networkstatus_get_live_consensus(time_t now)
 {
   (void) now;
   return &mock_ns;
+}
+
+static int
+mock_write_str_to_file(const char *path, const char *str, int bin)
+{
+  (void) bin;
+  (void) path;
+  (void) str;
+  return 0;
+}
+
+static or_options_t mocked_options;
+
+static const or_options_t *
+mock_get_options(void)
+{
+  return &mocked_options;
 }
 
 static int
@@ -416,9 +433,10 @@ test_client_pick_intro(void *arg)
     const hs_descriptor_t *fetched_desc =
       hs_cache_lookup_as_client(&service_kp.pubkey);
     tt_assert(fetched_desc);
-    tt_mem_op(fetched_desc->subcredential, OP_EQ, desc->subcredential,
-              DIGEST256_LEN);
-    tt_assert(!fast_mem_is_zero((char*)fetched_desc->subcredential,
+    tt_mem_op(fetched_desc->subcredential.subcred,
+              OP_EQ, desc->subcredential.subcred,
+              SUBCRED_LEN);
+    tt_assert(!fast_mem_is_zero((char*)fetched_desc->subcredential.subcred,
                                DIGEST256_LEN));
     tor_free(encoded);
   }
@@ -948,6 +966,7 @@ test_close_intro_circuits_new_desc(void *arg)
   (void) arg;
 
   hs_init();
+  rend_cache_init();
 
   /* This is needed because of the client cache expiration timestamp is based
    * on having a consensus. See cached_client_descriptor_has_expired(). */
@@ -971,6 +990,51 @@ test_close_intro_circuits_new_desc(void *arg)
   tt_assert(circ);
   circ->purpose = CIRCUIT_PURPOSE_C_INTRODUCING;
   ocirc = TO_ORIGIN_CIRCUIT(circ);
+
+  /* Build a descriptor _without_ client authorization and thus not
+   * decryptable. Make sure the close circuit code path is not triggered. */
+  {
+    char *desc_encoded = NULL;
+    uint8_t descriptor_cookie[HS_DESC_DESCRIPTOR_COOKIE_LEN];
+    curve25519_keypair_t client_kp;
+    hs_descriptor_t *desc = NULL;
+
+    tt_int_op(0, OP_EQ, curve25519_keypair_generate(&client_kp, 0));
+    crypto_rand((char *) descriptor_cookie, sizeof(descriptor_cookie));
+
+    desc = hs_helper_build_hs_desc_with_client_auth(descriptor_cookie,
+                                                    &client_kp.pubkey,
+                                                    &service_kp);
+    tt_assert(desc);
+    ret = hs_desc_encode_descriptor(desc, &service_kp, descriptor_cookie,
+                                    &desc_encoded);
+    tt_int_op(ret, OP_EQ, 0);
+    /* Associate descriptor intro key with the dummy circuit. */
+    const hs_desc_intro_point_t *ip =
+      smartlist_get(desc->encrypted_data.intro_points, 0);
+    tt_assert(ip);
+    ocirc->hs_ident = hs_ident_circuit_new(&service_kp.pubkey);
+    ed25519_pubkey_copy(&ocirc->hs_ident->intro_auth_pk,
+                        &ip->auth_key_cert->signed_key);
+    hs_descriptor_free(desc);
+    tt_assert(desc_encoded);
+    /* Put it in the cache. Should not be decrypted since the client
+     * authorization creds were not added to the global map. */
+    ret = hs_cache_store_as_client(desc_encoded, &service_kp.pubkey);
+    tor_free(desc_encoded);
+    tt_int_op(ret, OP_EQ, HS_DESC_DECODE_NEED_CLIENT_AUTH);
+
+    /* Clean cache with a future timestamp. It will trigger the clean up and
+     * attempt to close the circuit but only if the descriptor is decryptable.
+     * Cache object should be removed and circuit untouched. */
+    hs_cache_clean_as_client(mock_ns.valid_after + (60 * 60 * 24));
+    tt_assert(!hs_cache_lookup_as_client(&service_kp.pubkey));
+
+    /* Make sure the circuit still there. */
+    tt_assert(circuit_get_next_intro_circ(NULL, true));
+    /* Get rid of the ident, it will be replaced in the next tests. */
+    hs_ident_circuit_free(ocirc->hs_ident);
+  }
 
   /* Build the first descriptor and cache it. */
   {
@@ -1330,6 +1394,85 @@ test_close_intro_circuit_failure(void *arg)
   hs_free_all();
 }
 
+static void
+test_purge_ephemeral_client_auth(void *arg)
+{
+  ed25519_keypair_t service_kp;
+  hs_client_service_authorization_t *auth = NULL;
+  hs_client_register_auth_status_t status;
+
+  (void) arg;
+
+  /* We will try to write on disk client credentials. */
+  MOCK(check_private_dir, mock_check_private_dir);
+  MOCK(get_options, mock_get_options);
+  MOCK(write_str_to_file, mock_write_str_to_file);
+
+  /* Boggus directory so when we try to write the permanent client
+   * authorization data to disk, we don't fail. See
+   * store_permanent_client_auth_credentials() for more details. */
+  mocked_options.ClientOnionAuthDir = tor_strdup("auth_dir");
+
+  hs_init();
+
+  /* Generate service keypair */
+  tt_int_op(0, OP_EQ, ed25519_keypair_generate(&service_kp, 0));
+
+  /* Generate a client authorization object. */
+  auth = tor_malloc_zero(sizeof(hs_client_service_authorization_t));
+
+  /* Set it up. No flags meaning it is ephemeral. */
+  curve25519_secret_key_generate(&auth->enc_seckey, 0);
+  hs_build_address(&service_kp.pubkey, HS_VERSION_THREE, auth->onion_address);
+  auth->flags = 0;
+
+  /* Confirm that there is nothing in the client auth map. It is unallocated
+   * until we add the first entry. */
+  tt_assert(!get_hs_client_auths_map());
+
+  /* Add an entry to the client auth list. We loose ownership of the auth
+   * object so nullify it. */
+  status = hs_client_register_auth_credentials(auth);
+  auth = NULL;
+  tt_int_op(status, OP_EQ, REGISTER_SUCCESS);
+
+  /* We should have the entry now. */
+  digest256map_t *client_auths = get_hs_client_auths_map();
+  tt_assert(client_auths);
+  tt_int_op(digest256map_size(client_auths), OP_EQ, 1);
+
+  /* Purge the cache that should remove all ephemeral values. */
+  purge_ephemeral_client_auth();
+  tt_int_op(digest256map_size(client_auths), OP_EQ, 0);
+
+  /* Now add a new authorization object but permanent. */
+  /* Generate a client authorization object. */
+  auth = tor_malloc_zero(sizeof(hs_client_service_authorization_t));
+  curve25519_secret_key_generate(&auth->enc_seckey, 0);
+  hs_build_address(&service_kp.pubkey, HS_VERSION_THREE, auth->onion_address);
+  auth->flags = CLIENT_AUTH_FLAG_IS_PERMANENT;
+
+  /* Add an entry to the client auth list. We loose ownership of the auth
+   * object so nullify it. */
+  status = hs_client_register_auth_credentials(auth);
+  auth = NULL;
+  tt_int_op(status, OP_EQ, REGISTER_SUCCESS);
+  tt_int_op(digest256map_size(client_auths), OP_EQ, 1);
+
+  /* Purge again, the entry should still be there. */
+  purge_ephemeral_client_auth();
+  tt_int_op(digest256map_size(client_auths), OP_EQ, 1);
+
+ done:
+  client_service_authorization_free(auth);
+  hs_free_all();
+  tor_free(mocked_options.ClientOnionAuthDir);
+
+  UNMOCK(check_private_dir);
+  UNMOCK(get_options);
+  UNMOCK(write_str_to_file);
+}
+
 struct testcase_t hs_client_tests[] = {
   { "e2e_rend_circuit_setup_legacy", test_e2e_rend_circuit_setup_legacy,
     TT_FORK, NULL, NULL },
@@ -1356,6 +1499,10 @@ struct testcase_t hs_client_tests[] = {
 
   /* SOCKS5 Extended Error Code. */
   { "socks_hs_errors", test_socks_hs_errors, TT_FORK, NULL, NULL },
+
+  /* Client authorization. */
+  { "purge_ephemeral_client_auth", test_purge_ephemeral_client_auth, TT_FORK,
+    NULL, NULL },
 
   END_OF_TESTCASES
 };

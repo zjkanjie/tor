@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -318,6 +318,10 @@ int options_validate(const or_options_t *old_options,
                      or_options_t *options,
                      char **msg);
 #endif
+
+STATIC int parse_ports(or_options_t *options, int validate_only,
+                       char **msg, int *n_ports_out,
+                       int *world_writable_control_socket);
 
 #endif /* defined(CONFIG_PRIVATE) */
 

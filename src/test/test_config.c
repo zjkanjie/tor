@@ -1,6 +1,6 @@
 /* Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 #include "orconfig.h"
@@ -28,6 +28,7 @@
 #include "feature/control/control.h"
 #include "core/mainloop/cpuworker.h"
 #include "feature/dircache/dirserv.h"
+#include "feature/dirclient/dirclient_modes.h"
 #include "feature/dirauth/dirvote.h"
 #include "feature/relay/dns.h"
 #include "feature/client/entrynodes.h"
@@ -3705,7 +3706,7 @@ test_config_directory_fetch(void *arg)
   options->ClientOnly = 1;
   tt_assert(server_mode(options) == 0);
   tt_assert(public_server_mode(options) == 0);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 0);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 0);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 1);
 
@@ -3715,7 +3716,7 @@ test_config_directory_fetch(void *arg)
   options->UseBridges = 1;
   tt_assert(server_mode(options) == 0);
   tt_assert(public_server_mode(options) == 0);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 0);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 0);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 1);
 
@@ -3727,7 +3728,7 @@ test_config_directory_fetch(void *arg)
   options->ORPort_set = 1;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 0);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 0);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 0);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 1);
 
@@ -3738,7 +3739,7 @@ test_config_directory_fetch(void *arg)
   options->FetchDirInfoEarly = 1;
   tt_assert(server_mode(options) == 0);
   tt_assert(public_server_mode(options) == 0);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 1);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 1);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 1);
 
@@ -3752,14 +3753,14 @@ test_config_directory_fetch(void *arg)
   mock_router_pick_published_address_result = -1;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 1);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 1);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 1);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 0);
 
   mock_router_pick_published_address_result = 0;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 1);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 0);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 0);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 0);
 
@@ -3780,7 +3781,7 @@ test_config_directory_fetch(void *arg)
   options->RefuseUnknownExits = 1;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 1);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 1);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 1);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 0);
 
@@ -3788,7 +3789,7 @@ test_config_directory_fetch(void *arg)
   mock_router_pick_published_address_result = 0;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 1);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 0);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 0);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 0);
 
@@ -3810,7 +3811,7 @@ test_config_directory_fetch(void *arg)
   mock_router_get_my_routerinfo_result = &routerinfo;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 1);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 1);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 1);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 0);
 
@@ -3819,7 +3820,7 @@ test_config_directory_fetch(void *arg)
   mock_router_get_my_routerinfo_result = &routerinfo;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 1);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 0);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 0);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 0);
 
@@ -3827,7 +3828,7 @@ test_config_directory_fetch(void *arg)
   mock_router_get_my_routerinfo_result = NULL;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 1);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 0);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 0);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 0);
 
@@ -3837,7 +3838,7 @@ test_config_directory_fetch(void *arg)
   mock_router_get_my_routerinfo_result = &routerinfo;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 1);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 0);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 0);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 0);
 
@@ -3847,7 +3848,7 @@ test_config_directory_fetch(void *arg)
   mock_router_get_my_routerinfo_result = &routerinfo;
   tt_assert(server_mode(options) == 1);
   tt_assert(public_server_mode(options) == 1);
-  tt_int_op(directory_fetches_from_authorities(options), OP_EQ, 1);
+  tt_int_op(dirclient_fetches_from_authorities(options), OP_EQ, 1);
   tt_int_op(networkstatus_consensus_can_use_multiple_directories(options),
             OP_EQ, 0);
 
@@ -4157,6 +4158,8 @@ test_config_parse_port_config__ports__ports_given(void *data)
   /* Test entry port defaults as initialised in port_parse_config */
   tt_int_op(port_cfg->entry_cfg.dns_request, OP_EQ, 1);
   tt_int_op(port_cfg->entry_cfg.ipv4_traffic, OP_EQ, 1);
+  tt_int_op(port_cfg->entry_cfg.ipv6_traffic, OP_EQ, 1);
+  tt_int_op(port_cfg->entry_cfg.prefer_ipv6, OP_EQ, 1);
   tt_int_op(port_cfg->entry_cfg.onion_traffic, OP_EQ, 1);
   tt_int_op(port_cfg->entry_cfg.cache_ipv4_answers, OP_EQ, 0);
   tt_int_op(port_cfg->entry_cfg.prefer_ipv6_virtaddr, OP_EQ, 1);
@@ -4726,7 +4729,7 @@ test_config_parse_port_config__ports__ports_given(void *data)
   port_cfg = (port_cfg_t *)smartlist_get(slout, 0);
   tt_int_op(port_cfg->port, OP_EQ, CFG_AUTO_PORT);
   tor_addr_parse(&addr, "127.0.0.46");
-  tt_assert(tor_addr_eq(&port_cfg->addr, &addr))
+  tt_assert(tor_addr_eq(&port_cfg->addr, &addr));
 
   // Test success with a port of auto in mixed case
   config_free_lines(config_port_valid); config_port_valid = NULL;
@@ -4740,7 +4743,7 @@ test_config_parse_port_config__ports__ports_given(void *data)
   port_cfg = (port_cfg_t *)smartlist_get(slout, 0);
   tt_int_op(port_cfg->port, OP_EQ, CFG_AUTO_PORT);
   tor_addr_parse(&addr, "127.0.0.46");
-  tt_assert(tor_addr_eq(&port_cfg->addr, &addr))
+  tt_assert(tor_addr_eq(&port_cfg->addr, &addr));
 
   // Test success with parsing both an address and an auto port
   config_free_lines(config_port_valid); config_port_valid = NULL;
@@ -4754,7 +4757,7 @@ test_config_parse_port_config__ports__ports_given(void *data)
   port_cfg = (port_cfg_t *)smartlist_get(slout, 0);
   tt_int_op(port_cfg->port, OP_EQ, CFG_AUTO_PORT);
   tor_addr_parse(&addr, "127.0.0.122");
-  tt_assert(tor_addr_eq(&port_cfg->addr, &addr))
+  tt_assert(tor_addr_eq(&port_cfg->addr, &addr));
 
   // Test failure when asked to parse an invalid address followed by auto
   config_free_lines(config_port_invalid); config_port_invalid = NULL;
@@ -4777,7 +4780,7 @@ test_config_parse_port_config__ports__ports_given(void *data)
   port_cfg = (port_cfg_t *)smartlist_get(slout, 0);
   tt_int_op(port_cfg->port, OP_EQ, 656);
   tor_addr_parse(&addr, "127.0.0.123");
-  tt_assert(tor_addr_eq(&port_cfg->addr, &addr))
+  tt_assert(tor_addr_eq(&port_cfg->addr, &addr));
 
   // Test failure if we can't parse anything at all
   config_free_lines(config_port_invalid); config_port_invalid = NULL;
@@ -4950,6 +4953,71 @@ test_config_parse_port_config__ports__server_options(void *data)
   smartlist_free(slout);
   config_free_lines(config_port_invalid); config_port_invalid = NULL;
   config_free_lines(config_port_valid); config_port_valid = NULL;
+}
+
+static void
+test_config_get_first_advertised(void *data)
+{
+  (void)data;
+  int r, w=0, n=0;
+  char *msg=NULL;
+  or_options_t *opts = options_new();
+  int port;
+  const tor_addr_t *addr;
+
+  // no ports are configured? We get NULL.
+  port = get_first_advertised_port_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_INET);
+  tt_int_op(port, OP_EQ, 0);
+  addr = get_first_advertised_addr_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_INET);
+  tt_ptr_op(addr, OP_EQ, NULL);
+
+  port = get_first_advertised_port_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_INET6);
+  tt_int_op(port, OP_EQ, 0);
+  addr = get_first_advertised_addr_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_INET6);
+  tt_ptr_op(addr, OP_EQ, NULL);
+
+  config_line_append(&opts->ORPort_lines, "ORPort", "[1234::5678]:8080");
+  config_line_append(&opts->ORPort_lines, "ORPort",
+                     "1.2.3.4:9999 noadvertise");
+  config_line_append(&opts->ORPort_lines, "ORPort",
+                     "5.6.7.8:9911 nolisten");
+
+  r = parse_ports(opts, 0, &msg, &n, &w);
+  tt_assert(r == 0);
+
+  // UNSPEC gets us nothing.
+  port = get_first_advertised_port_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_UNSPEC);
+  tt_int_op(port, OP_EQ, 0);
+  addr = get_first_advertised_addr_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_UNSPEC);
+  tt_ptr_op(addr, OP_EQ, NULL);
+
+  // Try AF_INET.
+  port = get_first_advertised_port_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_INET);
+  tt_int_op(port, OP_EQ, 9911);
+  addr = get_first_advertised_addr_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_INET);
+  tt_ptr_op(addr, OP_NE, NULL);
+  tt_str_op(fmt_addrport(addr,port), OP_EQ, "5.6.7.8:9911");
+
+  // Try AF_INET6
+  port = get_first_advertised_port_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_INET6);
+  tt_int_op(port, OP_EQ, 8080);
+  addr = get_first_advertised_addr_by_type_af(CONN_TYPE_OR_LISTENER,
+                                              AF_INET6);
+  tt_ptr_op(addr, OP_NE, NULL);
+  tt_str_op(fmt_addrport(addr,port), OP_EQ, "[1234::5678]:8080");
+
+ done:
+  or_options_free(opts);
+  config_free_all();
 }
 
 static void
@@ -5711,11 +5779,27 @@ test_config_check_bridge_distribution_setting_not_a_bridge(void *arg)
 static void
 test_config_check_bridge_distribution_setting_valid(void *arg)
 {
-  int ret = check_bridge_distribution_setting("https");
-
   (void)arg;
 
-  tt_int_op(ret, OP_EQ, 0);
+  // Check all the possible values we support right now.
+  tt_int_op(check_bridge_distribution_setting("none"), OP_EQ, 0);
+  tt_int_op(check_bridge_distribution_setting("any"), OP_EQ, 0);
+  tt_int_op(check_bridge_distribution_setting("https"), OP_EQ, 0);
+  tt_int_op(check_bridge_distribution_setting("email"), OP_EQ, 0);
+  tt_int_op(check_bridge_distribution_setting("moat"), OP_EQ, 0);
+
+  // Check all the possible values we support right now with weird casing.
+  tt_int_op(check_bridge_distribution_setting("NoNe"), OP_EQ, 0);
+  tt_int_op(check_bridge_distribution_setting("anY"), OP_EQ, 0);
+  tt_int_op(check_bridge_distribution_setting("hTTps"), OP_EQ, 0);
+  tt_int_op(check_bridge_distribution_setting("emAIl"), OP_EQ, 0);
+  tt_int_op(check_bridge_distribution_setting("moAt"), OP_EQ, 0);
+
+  // Invalid values.
+  tt_int_op(check_bridge_distribution_setting("x\rx"), OP_EQ, -1);
+  tt_int_op(check_bridge_distribution_setting("x\nx"), OP_EQ, -1);
+  tt_int_op(check_bridge_distribution_setting("\t\t\t"), OP_EQ, -1);
+
  done:
   return;
 }
@@ -6184,6 +6268,7 @@ struct testcase_t config_tests[] = {
   CONFIG_TEST(parse_port_config__ports__no_ports_given, 0),
   CONFIG_TEST(parse_port_config__ports__server_options, 0),
   CONFIG_TEST(parse_port_config__ports__ports_given, 0),
+  CONFIG_TEST(get_first_advertised, TT_FORK),
   CONFIG_TEST(parse_log_severity, 0),
   CONFIG_TEST(include_limit, 0),
   CONFIG_TEST(include_does_not_exist, 0),

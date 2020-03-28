@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2019, The Tor Project, Inc. */
+/* Copyright (c) 2017-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -218,6 +218,8 @@ test_hs_control_good_onion_client_auth_add(void *arg)
   char *cp1 = NULL;
   size_t sz;
 
+  hs_init();
+
   { /* Setup the control conn */
     memset(&conn, 0, sizeof(control_connection_t));
     TO_CONN(&conn)->outbuf = buf_new();
@@ -415,6 +417,8 @@ test_hs_control_bad_onion_client_auth_add(void *arg)
   size_t sz;
   char *args = NULL;
 
+  hs_init();
+
   { /* Setup the control conn */
     memset(&conn, 0, sizeof(control_connection_t));
     TO_CONN(&conn)->outbuf = buf_new();
@@ -492,6 +496,8 @@ test_hs_control_store_permanent_creds(void *arg)
   char *creds_fname = NULL;
 
   size_t sz;
+
+  hs_init();
 
   { /* Setup the control conn */
     memset(&conn, 0, sizeof(control_connection_t));
@@ -632,6 +638,48 @@ test_hs_control_store_permanent_creds(void *arg)
   hs_client_free_all();
 }
 
+/** Test that ADD_ONION properly handles an attacker passing it a bad private
+ *  key. */
+static void
+test_hs_control_add_onion_with_bad_pubkey(void *arg)
+{
+  (void) arg;
+
+  MOCK(connection_write_to_buf_impl_, connection_write_to_buf_mock);
+
+  int retval;
+  control_connection_t conn;
+  char *args = NULL;
+  char *cp1 = NULL;
+  size_t sz;
+
+  hs_init();
+
+  { /* Setup the control conn */
+    memset(&conn, 0, sizeof(control_connection_t));
+    TO_CONN(&conn)->outbuf = buf_new();
+    conn.current_cmd = tor_strdup("ADD_ONION");
+  }
+
+  args = tor_strdup("ED25519-V3:AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    "AAAAAAAAAAAAAAAAAAAAAAA"
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "
+                    "Port=9735,127.0.0.1 Flags=DiscardPK");
+
+  retval = handle_control_command(&conn, (uint32_t) strlen(args), args);
+  tt_int_op(retval, OP_EQ, 0);
+
+  /* Check control port response */
+  cp1 = buf_get_contents(TO_CONN(&conn)->outbuf, &sz);
+  tt_str_op(cp1, OP_EQ, "551 Failed to generate onion address\r\n");
+
+ done:
+  tor_free(args);
+  tor_free(cp1);
+  buf_free(TO_CONN(&conn)->outbuf);
+  tor_free(conn.current_cmd);
+}
+
 struct testcase_t hs_control_tests[] = {
   { "hs_desc_event", test_hs_desc_event, TT_FORK,
     NULL, NULL },
@@ -643,6 +691,8 @@ struct testcase_t hs_control_tests[] = {
     NULL, NULL },
   { "hs_control_store_permanent_creds",
     test_hs_control_store_permanent_creds, TT_FORK, NULL, NULL },
+  { "hs_control_add_onion_with_bad_pubkey",
+    test_hs_control_add_onion_with_bad_pubkey, TT_FORK, NULL, NULL },
 
   END_OF_TESTCASES
 };

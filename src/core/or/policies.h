@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2019, The Tor Project, Inc. */
+ * Copyright (c) 2007-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -70,7 +70,6 @@ typedef struct short_policy_t {
 int firewall_is_fascist_or(void);
 int firewall_is_fascist_dir(void);
 int fascist_firewall_use_ipv6(const or_options_t *options);
-MOCK_DECL(int, fascist_firewall_rand_prefer_ipv6_addr, (void));
 int fascist_firewall_prefer_ipv6_orport(const or_options_t *options);
 int fascist_firewall_prefer_ipv6_dirport(const or_options_t *options);
 

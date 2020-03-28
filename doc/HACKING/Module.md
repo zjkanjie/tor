@@ -1,9 +1,9 @@
-# Modules in Tor #
+# Modules in Tor
 
 This document describes the build system and coding standards when writing a
 module in Tor.
 
-## What is a module? ##
+## What is a module?
 
 In the context of the tor code base, a module is a subsystem that we can
 selectively enable or disable, at `configure` time.
@@ -11,17 +11,23 @@ selectively enable or disable, at `configure` time.
 Currently, tor has these modules:
 
   - Relay subsystem (relay)
+  - Directory cache system (dircache).
   - Directory Authority subsystem (dirauth)
 
-dirauth is located in its own directory in `src/feature/dirauth/`.
+The dirauth code is located in its own directory in `src/feature/dirauth/`.
 
-Relay is located in directories named `src/*/*relay` and `src/*/*dircache`,
-which are being progressively refactored and disabled.
+The relay code is located in a directory named `src/*/*relay`, which is
+being progressively refactored and disabled.
+
+The dircache code is located in `src/*/*dircache`.  Right now, it is
+disabled if and only if the relay module is disabled.  (We are treating
+them as separate modules because they are logically independent, not
+because you would actually want to run one without the other.)
 
 To disable a module, pass `--disable-module-{dirauth,relay}` at configure
 time. All modules are currently enabled by default.
 
-## Build System ##
+## Build System
 
 The changes to the build system are pretty straightforward.
 
@@ -49,7 +55,7 @@ Finally, your module will automatically be included in the
 `TOR_MODULES_ALL_ENABLED` variable which is used to build the unit tests.
 They always build everything in order to test everything.
 
-## Coding ##
+## Coding
 
 As mentioned above, a module should be isolated in its own directories,
 suffixed with the name of the module, in `src/*/`.

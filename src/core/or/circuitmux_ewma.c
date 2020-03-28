@@ -1,4 +1,4 @@
-/* * Copyright (c) 2012-2019, The Tor Project, Inc. */
+/* * Copyright (c) 2012-2020, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -38,6 +38,7 @@
 #include "core/or/circuitmux.h"
 #include "core/or/circuitmux_ewma.h"
 #include "lib/crypt_ops/crypto_rand.h"
+#include "lib/crypt_ops/crypto_util.h"
 #include "feature/nodelist/networkstatus.h"
 #include "app/config/or_options_st.h"
 
@@ -186,6 +187,7 @@ ewma_free_cmux_data(circuitmux_t *cmux,
   pol = TO_EWMA_POL_DATA(pol_data);
 
   smartlist_free(pol->active_circuit_pqueue);
+  memwipe(pol, 0xda, sizeof(ewma_policy_data_t));
   tor_free(pol);
 }
 
@@ -252,7 +254,7 @@ ewma_free_circ_data(circuitmux_t *cmux,
   if (!pol_circ_data) return;
 
   cdata = TO_EWMA_POL_CIRC_DATA(pol_circ_data);
-
+  memwipe(cdata, 0xdc, sizeof(ewma_policy_circ_data_t));
   tor_free(cdata);
 }
 
@@ -421,7 +423,7 @@ ewma_cmp_cmux(circuitmux_t *cmux_1, circuitmux_policy_data_t *pol_data_1,
       /* Pick whichever one has the better best circuit */
       return compare_cell_ewma_counts(ce1, ce2);
     } else {
-      if (ce1 != NULL ) {
+      if (ce1 != NULL) {
         /* We only have a circuit on cmux_1, so prefer it */
         return -1;
       } else if (ce2 != NULL) {
@@ -607,7 +609,7 @@ cmux_ewma_set_options(const or_options_t *options,
   /* convert halflife into halflife-per-tick. */
   halflife /= EWMA_TICK_LEN;
   /* compute per-tick scale factor. */
-  ewma_scale_factor = exp( LOG_ONEHALF / halflife );
+  ewma_scale_factor = exp(LOG_ONEHALF / halflife);
   log_info(LD_OR,
            "Enabled cell_ewma algorithm because of value in %s; "
            "scale factor is %f per %d seconds",
